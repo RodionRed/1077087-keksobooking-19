@@ -1,61 +1,134 @@
 'use strict';
 
 (function () {
-  var NUMBER_OF_WIZARDS = 5;
+  var PIN_MAIN_ARROW_HEIGHT = 16;
   var map = document.querySelector('.map');
-  var mapPinMain = map.querySelector('.map__pin--main');
+  var mapFiltersContainer = map.querySelector('.map__filters-container');
+  var mapFilter = map.querySelector('.map__filters');
+  var mapFilterInputs = mapFilter.querySelectorAll('.map__filters-container input');
+  var mapFilterSelects = mapFilter.querySelectorAll('.map__filters-container select');
   var mapPinsArea = map.querySelector('.map__pins');
+  var mapPinMain = map.querySelector('.map__pin--main');
+  var pinMainStartPosition = {
+    x: mapPinMain.style.left,
+    y: mapPinMain.style.top
+  };
   var pinMainWidth = mapPinMain.offsetWidth;
   var pinMainHeight = pinMainWidth;
-  var pinMainArrowHeight = 16;
-  var pinMainFullHeight = pinMainHeight + pinMainArrowHeight;
-  var cardElements = [];
-  var pinButtons = [];
+  var pinMainFullHeight = pinMainHeight + PIN_MAIN_ARROW_HEIGHT;
   var cardObjects = [];
+  var DragLimit = {
+    X: {
+      MIN: 0,
+      MAX: mapPinsArea.offsetWidth
+    },
+    Y: {
+      MIN: 130,
+      MAX: 630
+    }
+  };
+
+  var renderFiltratedPins = function () {
+    window.render.showPins(window.filter.filtrate(window.map.cardObjects), mapPinsArea);
+  };
+
+  var filterChangeHandler = window.util.debounce(renderFiltratedPins);
+
+  var enableFilter = function () {
+    window.util.enableFormElements(mapFilterInputs);
+    window.util.enableFormElements(mapFilterSelects);
+    mapFilter.addEventListener('change', filterChangeHandler);
+  };
+
+  var disableFilter = function () {
+    window.util.disableFormElements(mapFilterInputs);
+    window.util.disableFormElements(mapFilterSelects);
+    mapFilter.removeEventListener('change', filterChangeHandler);
+  };
 
   var getAddressFromMainPin = function (isActive) {
-    var address;
     var left = parseInt(mapPinMain.style.left, 10);
     var top = parseInt(mapPinMain.style.top, 10);
-    if (isActive) {
-      address = Math.round(left + pinMainWidth / 2) + ', ' + Math.round(top + pinMainFullHeight);
-    } else {
-      address = Math.round(left + pinMainWidth / 2) + ', ' + Math.round(top + pinMainHeight / 2);
-    }
+    var address = Math.round(left + pinMainWidth / 2) + ', ';
+    address += isActive ? Math.round(top + pinMainFullHeight) : Math.round(top + pinMainHeight / 2);
     return address;
   };
 
-  var cardObjectsLoadSuccessHandler = function (array) {
-    for (var i = 0; i < array.length; i++) {
-      cardObjects.push(array[i]);
+  var pinsAreaClickHandler = function (evt) {
+    var target = evt.target.closest('button');
+    if (target !== mapPinMain && target) {
+      window.cardActions.showCard(target, mapFiltersContainer);
     }
-    var fragmentForPin = document.createDocumentFragment();
-    for (var j = 0; j < NUMBER_OF_WIZARDS; j++) {
-      if ('offer' in cardObjects[j]) {
-        fragmentForPin.appendChild(window.pin.renderPin(cardObjects[j]));
-      }
-    }
-    pinButtons = fragmentForPin.querySelectorAll('.map__pin');
-    mapPinsArea.appendChild(fragmentForPin);
-    var fragmentForCard = document.createDocumentFragment();
-    for (var k = 0; k < NUMBER_OF_WIZARDS; k++) {
-      if ('offer' in cardObjects[k]) {
-        fragmentForCard.appendChild(window.card.renderCard(cardObjects[k]));
-      }
-    }
-    cardElements = fragmentForCard.querySelectorAll('.map__card');
-    window.cardActions.activate(pinButtons, cardElements);
   };
 
-  var makeMapActive = function () {
+  var hasAlreadyLoaded = false;
+  var cardObjectsLoadSuccessHandler = function (data) {
+    data.forEach(function (item) {
+      if ('offer' in item) {
+        cardObjects.push(item);
+      }
+    });
+    window.render.showPins(cardObjects, mapPinsArea);
+    enableFilter();
+    hasAlreadyLoaded = true;
+  };
+
+  var cardObjectsLoadErrorHandler = function (message) {
+    window.message.show('error', message, true);
+  };
+
+  var activateMap = function () {
     map.classList.remove('map--faded');
-    window.ajax.loadCardObjects(cardObjectsLoadSuccessHandler);
+    if (!hasAlreadyLoaded) {
+      window.ajax.downloadData(cardObjectsLoadSuccessHandler, cardObjectsLoadErrorHandler);
+    } else {
+      window.render.showPins(cardObjects, mapPinsArea);
+      enableFilter();
+    }
+    mapPinsArea.addEventListener('click', pinsAreaClickHandler);
   };
 
-  window.dragNDrop.activate(mapPinMain, pinMainWidth, pinMainFullHeight, window.form.setAddress);
+  var deactivateMap = function () {
+    map.classList.add('map--faded');
+    mapPinMain.style.left = pinMainStartPosition.x;
+    mapPinMain.style.top = pinMainStartPosition.y;
+    window.cardActions.removeCard();
+    window.render.removePins();
+    mapFilter.reset();
+    disableFilter();
+    mapPinsArea.removeEventListener('click', pinsAreaClickHandler);
+    mapPinMain.addEventListener('mousedown', mapPinMainMouseDownHandler);
+    mapPinMain.addEventListener('keydown', mapPinMainEnterKeyHandler);
+  };
+
+  var activatePage = function () {
+    mapPinMain.removeEventListener('mousedown', mapPinMainMouseDownHandler);
+    mapPinMain.removeEventListener('keydown', mapPinMainEnterKeyHandler);
+    window.form.activate();
+    activateMap();
+  };
+
+  var mapPinMainMouseDownHandler = function () {
+    activatePage();
+  };
+
+  var mapPinMainEnterKeyHandler = function (evt) {
+    window.util.enterEvent(evt, activatePage);
+  };
+
+  mapPinMain.addEventListener('mousedown', mapPinMainMouseDownHandler);
+  mapPinMain.addEventListener('keydown', mapPinMainEnterKeyHandler);
+
+  window.dragNDrop.activate(DragLimit, mapPinMain, pinMainWidth, pinMainFullHeight, function () {
+    window.form.setAddress(true);
+  });
+
+  disableFilter();
 
   window.map = {
     getAddressFromMainPin: getAddressFromMainPin,
-    makeMapActive: makeMapActive,
+    activate: activateMap,
+    deactivate: deactivateMap,
+    cardObjects: cardObjects
   };
 })();
